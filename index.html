@@ -354,9 +354,10 @@ const DKEY="fas-planner-draft";
 function markDirty(){ dirty=true; try{localStorage.setItem(DKEY,JSON.stringify({base:ST.meta.saved||"",state:persistable()}));}catch(e){} paintStatus(); }
 async function save(){
   if(!dirty||!artifactNS) return;
+  { const who=await artifactNS.askEditor(); if(!who) return; artifactNS.note=who.note; }
   const btn=document.getElementById("savebtn"); btn.disabled=true; btn.textContent="Saving…";
-  ST.meta.saved=new Date().toISOString(); ST.meta.savedById=null; ST.meta.savedBy=(window.__CONF&&window.__CONF.me)||""; ST.meta.appVersion=APP_VERSION;
-  try{ const ps=persistable(); await artifactNS.save(ps,null,"save"); dirty=false; BASE0=JSON.stringify(ps); try{localStorage.removeItem(DKEY);}catch(e){} toast("Saved – everyone now sees this version"); }
+  ST.meta.saved=new Date().toISOString(); ST.meta.savedById=null; ST.meta.savedBy=(window.__CONF&&window.__CONF.editor)||""; ST.meta.appVersion=APP_VERSION;
+  try{ const ps=persistable(); await artifactNS.save(ps,null,"save"); dirty=false; BASE0=JSON.stringify(ps); try{localStorage.removeItem(DKEY);}catch(e){} toast("Saved by "+ST.meta.savedBy+" – everyone now sees this version"); }
   catch(e){ const code=(e&&e.code)||"";
     if(code==="conflict"){ const ok=await dialog("Someone saved first","Another person saved after you opened the planner. Reload to get their version – your edits stay as a draft you can restore.",[{label:"Not now",value:false},{label:"Reload",value:true,cls:"primary"}]); if(ok) location.reload(); }
     else if(code==="not_granted"||code==="not_writer"){ canWrite=false; toast("You have view-only access. Ask the owner for edit access to save."); applyRO(); }
@@ -506,7 +507,7 @@ async function paintLast(){ const el=document.getElementById("lastupd"); if(!el)
 /* ================= app version (a.b.c: a = major, b = new feature, c = fix / small change) ================= */
 const APP_VERSION="2.0.0";
 const CHANGELOG=[
- ["2.0.0", "2026-10-15", "Web version: hosted on Vercel, data in Supabase with sign-in, save history and conflict check. Motivational quotes removed from the header."],
+ ["2.0.0", "2026-10-15", "Web version: hosted on Vercel, data in Supabase with a shared sign-in. Save asks for your name (remembered in this browser) and an optional note; every save is logged with editor and note. Conflict check when two people save. Motivational quotes removed from the header."],
  ["1.25.0", "2026-10-14", "Language switch EN / ID in the header: menus, columns, buttons, Data Health, popups, messages, quotes and the Guide (status names and data stay as they are)."],
  ["1.24.1", "2026-10-14", "Motivational quotes in the header are now in English."],
  ["1.24.0", "2026-10-14", "Motivational quotes scrolling in the header (hover to pause)."],
@@ -1608,7 +1609,7 @@ async function newYear(){
 /* ================= boot ================= */
 function boot(){
   shell(); canWrite=false; artifactNS=undefined;
-  { const t=document.querySelector(".topin .spacer"); if(t&&window.__CONF){ const b=document.createElement("button"); b.className="btn sm"; b.textContent="👤 "+(window.__CONF.me||"Account").split("@")[0]; b.title="Signed in as "+window.__CONF.me+" – change password or sign out"; b.addEventListener("click",async()=>{ window.__CONF.account(); }); t.after(b); } }
+  { const t=document.querySelector(".topin .spacer"); if(t&&window.__CONF){ const b=document.createElement("button"); b.className="btn sm"; b.textContent="👤"; b.title="Signed in as "+window.__CONF.me+" – change password or sign out"; b.addEventListener("click",()=>window.__CONF.account()); t.after(b); const e=document.createElement("button"); e.className="btn sm"; e.id="editorChip"; e.textContent="✎ "+(window.__CONF.editor||"Set your name"); e.title="Your name as editor – click to change"; e.addEventListener("click",()=>window.__CONF.askEditor({rename:true})); t.after(e); } }
   let t="summary"; try{ t=localStorage.getItem("fas-planner-tab")||"summary"; }catch(e){}
   const hv=(location.hash||"").slice(1); if(TABS.some(x=>x[0]===hv)) t=hv;
   show(t);
@@ -1649,11 +1650,29 @@ function fail(title,msg){
   screen('<h2 style="margin-bottom:8px">'+esc(title)+'</h2><p class="sub" style="margin-bottom:16px">'+msg+'</p><div class="bar"><button class="btn primary" id="ldRetry">Try again</button></div>');
   document.getElementById("ldRetry").addEventListener("click",function(){ location.reload(); });
 }
-function errCode(e){ var m=((e&&e.message)||"")+" "+((e&&e.details)||""); return /conflict/.test(m)?"conflict":/not_allowed/.test(m)?"not_allowed":/invalid_data/.test(m)?"invalid_data":(e&&e.code)||"error"; }
-var CONF={seeded:false,baseVersion:null,me:"",
+function errCode(e){ var m=((e&&e.message)||"")+" "+((e&&e.details)||""); return /conflict/.test(m)?"conflict":/not_allowed/.test(m)?"not_allowed":/editor_required/.test(m)?"editor_required":/invalid_data/.test(m)?"invalid_data":(e&&e.code)||"error"; }
+var EKEY="fas-editor-name";
+function getEditor(){ try{ return localStorage.getItem(EKEY)||""; }catch(e){ return ""; } }
+function setEditor(n){ try{ localStorage.setItem(EKEY,n); }catch(e){} CONF.editor=n; var c=document.getElementById("editorChip"); if(c) c.textContent="✎ "+(n||"Set your name"); }
+var CONF={seeded:false,baseVersion:null,me:"",editor:getEditor(),note:"",
+  // Asks who is saving (remembered in this browser) and an optional note. Resolves {name,note} or null when cancelled.
+  askEditor:function(opts){ opts=opts||{}; return new Promise(function(res){
+    var d=document.createElement("div"); d.className="dlg";
+    d.innerHTML='<div role="dialog" aria-modal="true"><h3>'+(opts.rename?"Who is editing?":"Save changes")+'</h3><p>'+(opts.rename?"Your name is shown as the editor when you save. It is remembered in this browser.":"Everyone uses the same account, so add your name – it is shown in the change log.")+'</p>'
+      +'<form id="edForm" class="qgrid" style="grid-template-columns:120px 1fr;gap:8px 12px;margin-bottom:14px"><label for="edName">Your name</label><input id="edName" required maxlength="80" autocomplete="name" placeholder="e.g. Sumanth" value="'+esc(CONF.editor)+'">'
+      +(opts.rename?'':'<label for="edNote">What changed <span class="muted">(optional)</span></label><input id="edNote" maxlength="500" placeholder="e.g. Moved Desty E2E to SP23">')
+      +'</form><div class="acts"><button class="btn" data-a="c" type="button">Cancel</button><button class="btn primary" data-a="ok" type="button">'+(opts.rename?"OK":"Save")+'</button></div></div>';
+    document.body.appendChild(d);
+    var nameEl=d.querySelector("#edName"), noteEl=d.querySelector("#edNote");
+    function done(ok){ if(ok){ var n=nameEl.value.trim(); if(!n){ nameEl.focus(); nameEl.style.outline="2px solid var(--bad)"; return; } setEditor(n); d.remove(); res({name:n,note:noteEl?noteEl.value.trim():""}); } else { d.remove(); res(null); } }
+    d.addEventListener("click",function(e){ var a=e.target.dataset&&e.target.dataset.a; if(a==="ok") done(true); else if(a==="c"||e.target===d) done(false); });
+    d.querySelector("#edForm").addEventListener("submit",function(e){ e.preventDefault(); done(true); });
+    d.addEventListener("keydown",function(e){ if(e.key==="Enter"){ e.preventDefault(); done(true); } else if(e.key==="Escape") done(false); });
+    setTimeout(function(){ (CONF.editor&&noteEl?noteEl:nameEl).focus(); },30);
+  }); },
   save:async function(state,_summary,_msg){
     if(!SB) throw {code:"error",message:"Not connected."};
-    var r; try{ r=await SB.rpc("save_planner",{p_data:state,p_base_version:CONF.baseVersion}); }
+    var r; try{ r=await SB.rpc("save_planner",{p_data:state,p_base_version:CONF.baseVersion,p_editor:CONF.editor,p_note:CONF.note||null}); }
     catch(e){ throw {code:"network",message:"Could not reach the database. Check your connection – your edits are kept."}; }
     if(r.error){ var c=errCode(r.error);
       if(c==="conflict") throw {code:"conflict",message:"Someone saved first."};
@@ -1664,7 +1683,7 @@ var CONF={seeded:false,baseVersion:null,me:"",
   signOut:async function(){ try{ await SB.auth.signOut(); }catch(e){} location.reload(); },
   account:function(){
     var d=document.createElement("div"); d.className="dlg";
-    d.innerHTML='<div role="dialog" aria-modal="true"><h3>Account</h3><p>Signed in as <b>'+esc(CONF.me)+'</b></p>'
+    d.innerHTML='<div role="dialog" aria-modal="true"><h3>Account</h3><p>Signed in as <b>'+esc(CONF.me)+'</b>. This account is shared – changing the password changes it for everyone.</p>'
       +'<form id="pwForm" class="qgrid" style="grid-template-columns:130px 1fr;gap:8px 12px;margin-bottom:14px"><label for="pw1">New password</label><input id="pw1" type="password" autocomplete="new-password" minlength="8" required>'
       +'<label for="pw2">Repeat</label><input id="pw2" type="password" autocomplete="new-password" minlength="8" required><span></span><div><button class="btn sm primary" type="submit">Change password</button> <span id="pwMsg" class="muted"></span></div></form>'
       +'<div class="acts"><button class="btn danger" data-a="out">Sign out</button><button class="btn" data-a="c">Close</button></div></div>';
@@ -1687,7 +1706,7 @@ function login(msg){
    +'<form id="lgForm" class="qgrid" style="grid-template-columns:100px 1fr;gap:10px 12px"><label for="lgEmail">Email</label><input id="lgEmail" type="email" autocomplete="username" required placeholder="name@gdn-commerce.com">'
    +'<label for="lgPw">Password</label><input id="lgPw" type="password" autocomplete="current-password" required>'
    +'<span></span><div class="bar" style="margin:4px 0 0"><button class="btn primary" type="submit" id="lgBtn">Sign in</button></div>'
-   +'<span></span><small class="muted">No account or forgot your password? Ask the planner admin.</small></form>');
+   +'<span></span><small class="muted">Use the shared FAS Planner account. Forgot the password? Ask the planner admin.</small></form>');
   document.getElementById("lgForm").addEventListener("submit",async function(ev){ ev.preventDefault(); var b=document.getElementById("lgBtn"); b.disabled=true; b.textContent="Signing in…";
     var r; try{ r=await SB.auth.signInWithPassword({email:document.getElementById("lgEmail").value.trim(),password:document.getElementById("lgPw").value}); }
     catch(e){ return login("Could not reach the database. Check your connection."); }
@@ -1706,7 +1725,7 @@ async function start(){
   var r; try{ r=await SB.from("planner_state").select("data,version").eq("id",1).maybeSingle(); }
   catch(e){ return fail("Could not load data","Could not reach the database. Check your connection."); }
   if(r.error){ if(/JWT|token/i.test(r.error.message)) return login("Your session expired. Please sign in again."); return fail("Could not load data",esc(r.error.message)); }
-  if(!r.data) return fail("No planner data yet","Either the database is empty (run <code>2_seed.sql</code> in Supabase, see README) or your account is not allowed to see the planner (only @gdn-commerce.com accounts). <br><br>Signed in as "+esc(CONF.me)+' · <a href="#" id="lgOut">Sign out</a>');
+  if(!r.data) return fail("No planner data yet","Either the database is empty (run <code>2_seed.sql</code> in Supabase, see README) or this account is not in the allowed list at the top of <code>1_setup.sql</code>. <br><br>Signed in as "+esc(CONF.me)+' · <a href="#" id="lgOut">Sign out</a>');
   CONF.baseVersion=r.data.version;
   boot(r.data.data);
 }
