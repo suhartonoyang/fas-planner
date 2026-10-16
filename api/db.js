@@ -14,9 +14,14 @@ module.exports = async (req, res) => {
     if (await A.ensureFresh(sess)) writeSession(res, sess);
 
     if (req.method === "GET") {
-      const p = await A.getPage(sess);
-      const storage = ((p.body || {}).storage || {}).value || "";
-      return send(res, 200, { state: A.parseState(storage), version: (p.version || {}).number, title: p.title, pageUrl: A.PAGE_URL, me: sess.name, email: sess.email });
+      const att = await A.getAttachment(sess);
+      let state, version, source;
+      if (att) { state = await A.downloadAttachment(sess, att.id); version = att.version; source = "attachment"; }
+      else { // older format: JSON inside the page – it moves to the attachment on the next save
+        const p = await A.getPage(sess);
+        state = A.parseState(((p.body || {}).storage || {}).value || ""); version = null; source = "page";
+      }
+      return send(res, 200, { state, version, source, pageUrl: A.PAGE_URL, me: sess.name, email: sess.email });
     }
 
     if (req.method === "POST") {
@@ -24,16 +29,19 @@ module.exports = async (req, res) => {
       try { b = await body(req); } catch (e) { return send(res, 400, { error: "Invalid request", code: "bad_request" }); }
       const state = b && b.state;
       if (!state || typeof state !== "object" || !state.years) return send(res, 400, { error: "Invalid planner data", code: "bad_request" });
-      const p = await A.getPage(sess);
-      const cur = (p.version || {}).number;
-      let hasState = true;
-      try { hasState = A.parseState(((p.body || {}).storage || {}).value || "") !== null; } catch (e) { hasState = true; }
+      const att = await A.getAttachment(sess);
+      const cur = att ? att.version : null;
       const base = b.baseVersion === undefined ? null : b.baseVersion;
-      if ((base === null && hasState) || (base !== null && base !== cur)) return send(res, 409, { error: "Someone saved to Confluence first.", code: "conflict", version: cur });
-      const r = await A.putPage(sess, p.title, cur + 1, A.buildBody(b.summary, state), b.message);
-      if (r.status === 409) return send(res, 409, { error: "Someone saved to Confluence first.", code: "conflict" });
-      if (r.status !== 200 && r.status !== 201) throw (r.status === 401 || r.status === 403 || r.status === 404) ? new A.ApiError(r.status, "Your Atlassian account cannot edit the planner's Confluence page.") : new A.ApiError(502, (r.json && r.json.message) || `Confluence error HTTP ${r.status}`);
-      return send(res, 200, { ok: true, version: ((r.json || {}).version || {}).number || cur + 1 });
+      if (base !== cur) return send(res, 409, { error: "Someone saved to Confluence first.", code: "conflict", version: cur });
+      const msg = String(b.message || "Saved from FAS Planner").slice(0, 250);
+      const newV = await A.uploadAttachment(sess, state, msg);
+      let warning = "";
+      try { // refresh the readable summary on the page – the data itself is already saved
+        const p = await A.getPageMeta(sess);
+        const r = await A.putPage(sess, p.title, ((p.version || {}).number || 0) + 1, A.buildBody(b.summary, newV), msg);
+        if (r.status !== 200 && r.status !== 201) warning = `Data saved, but the summary on the Confluence page could not be refreshed (HTTP ${r.status}).`;
+      } catch (e) { warning = "Data saved, but the summary on the Confluence page could not be refreshed."; }
+      return send(res, 200, { ok: true, version: newV, warning });
     }
 
     send(res, 405, { error: "Method not allowed" });
