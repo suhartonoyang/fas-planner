@@ -16,7 +16,7 @@ module.exports = async (req, res) => {
     if (req.method === "GET") {
       const att = await A.getAttachment(sess);
       let state, version, source;
-      if (att) { state = await A.downloadAttachment(sess, att.id); version = att.version; source = "attachment"; }
+      if (att) { state = await A.downloadAttachment(sess, att); version = att.version; source = "attachment"; }
       else { // older format: JSON inside the page – it moves to the attachment on the next save
         const p = await A.getPage(sess);
         state = A.parseState(((p.body || {}).storage || {}).value || ""); version = null; source = "page";
