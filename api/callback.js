@@ -21,7 +21,7 @@ module.exports = async (req, res) => {
   if (q.error) return fail(400, "Sign-in cancelled", q.error_description || q.error);
   if (!q.code || !q.state || !expected || q.state !== expected) return fail(400, "Sign-in expired", "Please start the sign-in again from the planner.");
   try {
-    const sess = await startSession(q.code);
+    const sess = await startSession(q.code, req);
     writeSession(res, sess);
     redirect(res, "/");
   } catch (e) {
