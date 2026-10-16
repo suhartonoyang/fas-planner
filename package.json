@@ -1,0 +1,6 @@
+{
+  "name": "fas-planner",
+  "private": true,
+  "description": "FAS Planner – static page + Vercel functions; sign-in with Atlassian, data on a Confluence page",
+  "engines": { "node": ">=18" }
+}
