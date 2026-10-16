@@ -1,6 +1,6 @@
 # FAS Planner – Web (Vercel + Confluence)
 
-The team opens one URL and signs in with their **Atlassian account**. The planner reads and saves its data on the Confluence page **[0] FAS Planner Database** using each person's own Confluence permissions.
+The team opens one URL and signs in with their **Atlassian account**. The planner keeps its data on the Confluence page **[0] FAS Planner Database**, as the attached file **`fas_planner_data.json`**. Every save uploads a new version of that file, and each person's own Confluence permissions apply. The page itself shows only a light, readable summary (last saved by…, Roadmap table), so it opens quickly.
 
 - Vercel only hosts the page and passes requests through. It stores no planner data.
 - Only people who can open the Confluence page can see the plan, and only people who can edit it can save.
@@ -19,9 +19,9 @@ Setup takes about 30 minutes and is done once, by the planner admin.
 
 1. Open https://developer.atlassian.com/console/myapp, signed in with your **work** Atlassian account → **Create → OAuth 2.0 integration** → name `FAS Planner` → Create.
 2. **Permissions**:
-   - **Confluence API** → Add → Configure → **Granular scopes** → add `read:page:confluence` and `write:page:confluence`.
+   - **Confluence API** → Add → Configure → **Granular scopes** → add these five: `read:page:confluence`, `write:page:confluence`, `read:attachment:confluence`, `write:attachment:confluence`, `read:content-details:confluence`.
    - **User identity API** → Add (`read:me`).
-3. **Authorization** → OAuth 2.0 (3LO) → **Callback URL**: `https://YOUR-APP.vercel.app/api/callback`. Use the real URL after step 3. You can come back and change it.
+3. **Authorization** → OAuth 2.0 (3LO) → **Callback URL**: skip this for now. You will fill it in after step 3, using the address shown by `/api/health`.
 4. **Distribution** → Edit → turn **Sharing** on so colleagues can sign in. Without this, only you can sign in. Fill in the vendor name (GDN) and a privacy-policy link (an internal Confluence page is fine).
 5. **Settings** → copy the **Client ID** and **Secret**.
 
@@ -35,23 +35,28 @@ Setup takes about 30 minutes and is done once, by the planner admin.
 ## 3. Vercel – put it online
 
 1. On https://vercel.com, click **Continue with GitHub** → **Add New → Project** → import `fas-planner`. Framework: **Other**. Leave the build settings empty.
-2. Under **Environment Variables**, add these four:
+2. Under **Environment Variables**, add these three:
 
    | Name | Value |
    |---|---|
    | `ATLASSIAN_CLIENT_ID` | Client ID from step 1 |
    | `ATLASSIAN_CLIENT_SECRET` | Secret from step 1 |
-   | `SESSION_SECRET` | A random string of 40+ characters (e.g. from a password generator). Keep it secret. |
-   | `APP_URL` | Your site address, e.g. `https://fas-planner.vercel.app` (no slash at the end) |
+   | `SESSION_SECRET` | A random string of 40+ characters. On a Mac, run `openssl rand -base64 48` in Terminal. Keep it secret. |
 
-   Optional: `ALLOWED_EMAIL_DOMAINS` = `gdn-commerce.com` to refuse any other email domain.
-3. **Deploy**. If the final URL differs from what you used, update `APP_URL` (Vercel → Settings → Environment Variables → Redeploy) and the Callback URL in step 1.3.
+   Optional settings:
+   - `APP_URL`: only needed with a custom domain. Without it, the address you open is used.
+   - `ALLOWED_EMAIL_DOMAINS` = `gdn-commerce.com`: refuses any other email domain.
+3. **Deploy**.
+4. Open `https://YOUR-SITE/api/health` (for example `https://fas-planner.vercel.app/api/health`):
+   - Every setting should say `set`. If one says `MISSING`, add it under Settings → Environment Variables, then **Redeploy**: Deployments → ⋯ on the latest → Redeploy. New settings only apply after a redeploy.
+   - Copy the value of `callbackUrlToRegisterInAtlassian` and paste it as the **Callback URL** in step 1.3. Save.
 
 > **Plan note:** Vercel's free Hobby plan is for personal, non-commercial use. A company tool may need the Pro plan; check with your manager.
 
 ## 4. First time only – load the data
 
-If the Confluence page has no planner data yet, the planner says **"The planner database is empty"**:
+- **If the page still has the data inside it** (older format, saved by an earlier desktop version): nothing to do. The planner reads it, and the first **Save changes** moves it into the attached file automatically.
+- **If the page has no planner data at all**, the planner says **"The planner database is empty"**:
 
 1. Click **Choose data file…** → pick `first-time-data/fas_planner_seed.json`.
 2. Check the plan, then press **Save changes**. The data is now on the Confluence page.
@@ -69,6 +74,7 @@ On the Confluence page **[0] FAS Planner Database**, click the 🔒 **Restrictio
 
 - Open the URL → **Sign in with Atlassian** (first time: approve access) → edit → **Save changes**.
 - If someone saved after you opened the page, you are asked to reload. Your edits are kept as a draft you can restore.
+- **Older versions of the data:** on the Confluence page, open ••• → **Attachments** → `fas_planner_data.json` → version history. Each save is a version, and you can download any of them.
 - If your session expires while editing, you are asked to sign in again. Your edits stay as a draft.
 - **⚙ Settings**: theme, language, Excel export/import, the Confluence page link, and **Sign out**.
 - The desktop (Python) version still works with the same Confluence page, so both versions can be used side by side.
