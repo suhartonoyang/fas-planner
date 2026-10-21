@@ -600,8 +600,9 @@ async function paintLast(){ const el=document.getElementById("lastupd"); if(!el)
 
 
 /* ================= app version (a.b.c: a = major, b = new feature, c = fix / small change) ================= */
-const APP_VERSION="2.2.0";
+const APP_VERSION="2.3.0";
 const CHANGELOG=[
+ ["2.3.0", "2026-10-21", "Gantt Chart hover shows only the field under the mouse plus its comments."],
  ["2.2.0", "2026-10-16", "Export Excel produces the full FAS Planner (Excel) workbook (all sheets, formulas, colours, dropdowns) filled with the current data; Import Excel reads it too."],
  ["2.1.0", "2026-10-16", "Export Excel fixed and now uses the FAS 2026 New workbook layout (can be imported again). Safe sign-in information on the sign-in screen."],
  ["2.0.0", "2026-10-16", "Web version on Vercel: sign in with your Atlassian account; data is read from and saved to the Confluence page [0] FAS Planner Database with your own Confluence permissions. Data is kept as the attached file fas_planner_data.json on that page (a new version on every save), so the page stays light. Includes all header, Gantt and calendar improvements of the desktop version 1.35.0."],
@@ -1060,12 +1061,28 @@ function ganttHover(w){ if(w.dataset.hov) return; w.dataset.hov=1;
   let lastTh=null; const clear=()=>{ tip.hidden=true; if(lastTh){ lastTh.classList.remove("hcol"); lastTh=null; } };
   w.addEventListener("mousemove",e=>{ const td=e.target.closest("td"); const tr=td&&td.closest("tr[data-rid]"); if(!tr){ clear(); return; }
     const id=tr.dataset.rid, g=(ST.gantt||[]).find(x=>x.id===id)||{}, i=X.rmById[id]||{}, nm=g.label||i.name||id;
-    let extra=""; const sn=td.dataset.s?+td.dataset.s:null;
+    if(td.hasAttribute("title")){ td.dataset.tt=td.getAttribute("title"); td.removeAttribute("title"); }
+    td.querySelectorAll("[title]").forEach(el=>{ el.dataset.tt=el.getAttribute("title"); el.removeAttribute("title"); });
     if(lastTh){ lastTh.classList.remove("hcol"); lastTh=null; }
-    if(sn){ const x=(g.sp||[])[sn-1]||[], a1=x[0]||"", a2=(x[1]===null||x[1]===undefined)?a1:x[1];
-      extra=`<div class="m">${spl(sn)} · W1: ${esc(a1||"–")} · W2: ${esc(a2||"–")}${x[2]!=null?` · ${+x[2]} ppl`:""}</div>`;
+    const ck=td.dataset.ck||"", f=ck.split("|")[2]||(td.dataset.s?"sp"+td.dataset.s:"");
+    const wkS=w_=>{ const s=X.sprints[Math.ceil(w_/2)-1]; return s&&s.sd?new Date(s.sd.getTime()+((w_%2===0)?7:0)*864e5):null; };
+    const wkTxt=w_=>{ if(!w_) return ""; const d=wkS(w_); return `${spl(Math.ceil(w_/2))}-W${w_%2?1:2}${d?` · week of ${fmtD(d)}`:""}`; };
+    const sp_=X.span[id]; let lab="", val="", sub="";
+    if(f==="id"){ lab="Roadmap ID"; val=id; }
+    else if(f==="name"){ lab="Initiative"; val=nm; }
+    else if(f==="apc"){ lab="Product area | Program | Channel"; val=id==="TECH-DEBT"?"Reserved capacity":(i.id?[i.area,i.prog,i.chan].map(x=>x||"–").join(" | "):""); }
+    else if(f==="prio"){ lab="Priority"; val=i.prio||""; }
+    else if(f==="status"){ lab="Status"; val=i.status?(typeof stLbl==="function"?stLbl(i.status):i.status):""; }
+    else if(f==="tl"){ lab="Timeline note"; val=i.tl||""; }
+    else if(f==="start"){ lab="Start"; val=sp_?wkTxt(sp_.min):""; }
+    else if(f==="end"){ lab="End"; val=sp_?wkTxt(sp_.max):""; }
+    else if(/^sp\d+$/.test(f)){ const sn=+f.slice(2), s=X.sprints[sn-1]||{}, x=(g.sp||[])[sn-1]||[], a1=x[0]||"", inh=(x[1]===null||x[1]===undefined), a2=inh?a1:x[1];
+      lab=`${spl(sn)}${s.sd?` · ${fmtD(s.sd)}–${fmtD(s.ed)}`:""}`;
+      val=(a1||a2||x[2]!=null)?`W1: ${a1||"–"} · W2: ${a2||"–"}${inh&&a1?" (follows W1)":""}${x[2]!=null?` · ${+x[2]} ppl`:""}`:"Not planned – click to plan";
       const th=w.querySelector(`thead th[data-sn="${sn}"]`); if(th){ th.classList.add("hcol"); lastTh=th; } }
-    tip.innerHTML=`<b>${esc(id)}</b> · ${esc(nm)}${i.prio?` <span class="m">(${esc(i.prio)})</span>`:""}${i.owner?`<div class="m">Owner: ${esc(i.owner)}</div>`:""}${extra}`; tip.hidden=false;
+    else { clear(); return; }
+    const cm=((ST.comments||{})[ck||`g|${id}|${f}`]||[]); if(cm.length){ const c=cm[cm.length-1]; sub=`<div class="m" style="margin-top:4px">💬 ${cm.length} comment${cm.length>1?"s":""} – ${esc(c.by||"")}: ${esc(String(c.t||"").slice(0,140))}</div>`; }
+    tip.innerHTML=`<div class="m">${esc(lab)}</div><div style="white-space:pre-wrap;font-weight:600">${esc(val||"–")}</div>${sub}`; tip.hidden=false;
     const r=tip.getBoundingClientRect(); let x=e.clientX+14, y=e.clientY+16; if(x+r.width>innerWidth-8) x=e.clientX-r.width-14; if(y+r.height>innerHeight-8) y=e.clientY-r.height-12;
     tip.style.left=x+"px"; tip.style.top=y+"px"; });
   w.addEventListener("mouseleave",clear); w.addEventListener("scroll",clear,{passive:true}); }
